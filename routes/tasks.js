@@ -199,13 +199,49 @@ router.get('/:taskId', authMiddleware, async (req, res) => {
 
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
+// router.put('/:taskId/update', authMiddleware, upload, async (req, res) => {
+//   const taskId = req.params.taskId;
+//   const username = req.user.username;
+//   const { status, title, description, due_date, priority, comment, assigned_to} = req.body;
+
+//   // Clean path generation
+  
+//   const audioPath = req.files?.audio ? 'uploads/' + req.files.audio[0].filename : null;
+//   const filePath = req.files?.file ? 'uploads/' + req.files.file[0].filename : null;
+
+//   try {
+//     // 1. Update only status in tasks table
+//     await pool.query(`UPDATE tasks SET status = ? WHERE task_id = ?`, [status, taskId]);
+
+//     // 2. Insert update history into task_updates
+//     await pool.query(
+//       `INSERT INTO task_updates (task_id, updated_by, status, audio_path, file_path, comment)
+//        VALUES (?, ?, ?, ?, ?, ?)`,
+//       [taskId, username, status, audioPath, filePath, comment || null]
+//     );
+
+//     // 3. If updater is creator, update metadata
+//     const [[creatorCheck]] = await pool.query(`SELECT created_by FROM tasks WHERE task_id = ?`, [taskId]);
+//     if (creatorCheck.created_by === username) {
+//       await pool.query(
+//         `UPDATE tasks SET title = ?, description = ?, assigned_to = ?, due_date = ?, priority = ? WHERE task_id = ?`,
+//         [title, description, assigned_to, due_date, priority, taskId]
+//       );
+//     }
+
+//     res.json({ message: 'Task updated and progress saved' });
+//   } catch (err) {
+//     console.error('Update failed:', err);
+//     res.status(500).json({ message: 'Server error' });
+//   }
+// });
+
+//Update task progress
 router.put('/:taskId/update', authMiddleware, upload, async (req, res) => {
   const taskId = req.params.taskId;
   const username = req.user.username;
-  const { status, title, description, due_date, priority, comment, assigned_to} = req.body;
+  const { status, title, description, due_date, priority, comment, assigned_to } = req.body;
 
-  // Clean path generation
-  
   const audioPath = req.files?.audio ? 'uploads/' + req.files.audio[0].filename : null;
   const filePath = req.files?.file ? 'uploads/' + req.files.file[0].filename : null;
 
@@ -213,28 +249,80 @@ router.put('/:taskId/update', authMiddleware, upload, async (req, res) => {
     // 1. Update only status in tasks table
     await pool.query(`UPDATE tasks SET status = ? WHERE task_id = ?`, [status, taskId]);
 
-    // 2. Insert update history into task_updates
+    // 2. Insert everything else in task_updates table (full version snapshot)
     await pool.query(
-      `INSERT INTO task_updates (task_id, updated_by, status, audio_path, file_path, comment)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [taskId, username, status, audioPath, filePath, comment || null]
+      `INSERT INTO task_updates 
+        (task_id, updated_by, status, title, description, assigned_to, due_date, priority, audio_path, file_path, comment) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [taskId, username, status, title || null, description || null, assigned_to || null, due_date || null, priority || null, audioPath, filePath, comment || null]
     );
 
-    // 3. If updater is creator, update metadata
-    const [[creatorCheck]] = await pool.query(`SELECT created_by FROM tasks WHERE task_id = ?`, [taskId]);
-    if (creatorCheck.created_by === username) {
-      await pool.query(
-        `UPDATE tasks SET title = ?, description = ?, assigned_to = ?, due_date = ?, priority = ? WHERE task_id = ?`,
-        [title, description, assigned_to, due_date, priority, taskId]
-      );
-    }
-
-    res.json({ message: 'Task updated and progress saved' });
+    res.json({ message: 'Task update recorded successfully' });
   } catch (err) {
     console.error('Update failed:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });
+
+
+// Get task progress timeline
+// router.get('/:taskId/progress', authMiddleware, async (req, res) => {
+//   const { taskId } = req.params;
+
+//   try {
+//     const [updates] = await pool.query(
+//       `SELECT 
+//          updated_by, 
+//          status, 
+//          comment, 
+//          audio_path, 
+//          file_path, 
+//          updated_at 
+//        FROM task_updates 
+//        WHERE task_id = ? 
+//        ORDER BY updated_at ASC`,
+//       [taskId]
+//     );
+
+//     res.status(200).json(updates);
+//   } catch (error) {
+//     console.error('Error fetching task progress:', error);
+//     res.status(500).json({ message: 'Failed to fetch task progress' });
+//   }
+// });
+
+// In tasks.js
+router.get('/:taskId/progress', authMiddleware, async (req, res) => {
+  const { taskId } = req.params;
+
+  try {
+    // 1. Fetch original task
+    const [taskRows] = await pool.query(
+      `SELECT title, description, created_by, assigned_to, status, priority, due_date, created_at
+       FROM tasks WHERE task_id = ?`,
+      [taskId]
+    );
+    if (taskRows.length === 0) {
+      return res.status(404).json({ message: 'Task not found' });
+    }
+
+    const originalTask = taskRows[0];
+
+    // 2. Fetch updates
+    const [updates] = await pool.query(
+      `SELECT updated_by, status, comment, audio_path, file_path, updated_at
+       FROM task_updates WHERE task_id = ? ORDER BY updated_at ASC`,
+      [taskId]
+    );
+
+    res.json({ task: originalTask, updates });
+  } catch (err) {
+    console.error('Error fetching task progress:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+
 
 
 module.exports = router;
