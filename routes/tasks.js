@@ -133,7 +133,7 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
       stats: {
         assignedToMe: assignedToMeRow[0].assignedToMe,
         assignedByMe,
-        ...statusCounts,
+        ...statusCounts[0],
       },
     });
 
