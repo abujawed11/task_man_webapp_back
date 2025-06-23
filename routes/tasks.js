@@ -45,6 +45,40 @@ const upload = multer({
 ]);
 
 
+// router.get('/all', async (req, res) => {
+//   console.log('✅ /all route hit');
+//   res.json([]);
+// });
+
+router.get('/all',authMiddleware, async (req, res) => {
+  try {
+    console.log("Getting All Tasks")
+    const [rows] = await pool.query(
+      // `SELECT id, title, description, priority, status, due_date, assigned_to, created_by, audio_path, file_path, created_at
+      //  FROM tasks`
+      `SELECT * FROM tasks`
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error('Error fetching all tasks:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+
+//All users in My Task Filter
+router.get('/users/all', authMiddleware, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT username from users`);
+
+    res.json(rows); // returns array of { username: '...' }
+  } catch (error) {
+    console.error('Error fetching all task users:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // Get dashboard statistics
 // router.get('/dashboard', authMiddleware, async (req, res) => {
 //   try {
@@ -399,6 +433,26 @@ router.get('/:taskId/progress', authMiddleware, async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
+
+
+// Get all tasks (Super Admin only)
+// router.get('/all', authMiddleware, superAdminMiddleware, async (req, res) => {
+//   try {
+//     const [rows] = await pool.query(
+//       `SELECT id, title, description, priority, status, due_date, assigned_to, created_by, audio_path, file_path, created_at
+//        FROM tasks`
+//     );
+//     res.json(rows);
+//   } catch (error) {
+//     console.error('Error fetching all tasks:', error);
+//     res.status(500).json({ message: 'Server error' });
+//   }
+// });
+
+
+
+
+
 
 
 

@@ -19,3 +19,12 @@ const authMiddleware = (req, res, next) => {
 };
 
 module.exports = authMiddleware;
+
+
+// Middleware to check Super Admin
+// const superAdminMiddleware = async (req, res, next) => {
+//   if (req.user.accountType !== 'Super Admin') {
+//     return res.status(403).json({ message: 'Access denied: Super Admin only' });
+//   }
+//   next();
+// };
