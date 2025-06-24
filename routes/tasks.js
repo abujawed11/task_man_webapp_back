@@ -185,7 +185,7 @@ router.get('/list', authMiddleware, async (req, res) => {
     const currentUserId = req.user.id;
     // console.log(currentUserId)
     const [rows] = await pool.query(
-      'SELECT username FROM users WHERE account_type != "Super Admin" AND user_id != ?', [currentUserId]
+      'SELECT username FROM users WHERE user_id != ?', [currentUserId]
     );
 
     // Extract usernames only
