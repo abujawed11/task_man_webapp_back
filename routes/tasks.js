@@ -6,6 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const authMiddleware = require('../middleware/authMiddleware');
 const { generateId } = require('../utils/idGenerator');
+const { createNotification } = require('../utils/notify');
 
 
 // Ensure uploads directory exists
@@ -50,20 +51,53 @@ const upload = multer({
 //   res.json([]);
 // });
 
-router.get('/all',authMiddleware, async (req, res) => {
+// router.get('/all', authMiddleware, async (req, res) => {
+//   try {
+//     console.log("Getting All Tasks")
+//     const [rows] = await pool.query(
+//       // `SELECT id, title, description, priority, status, due_date, assigned_to, created_by, audio_path, file_path, created_at
+//       //  FROM tasks`
+//       `SELECT * FROM tasks`
+//     );
+//     res.json(rows);
+//   } catch (error) {
+//     console.error('Error fetching all tasks:', error);
+//     res.status(500).json({ message: 'Server error' });
+//   }
+// });
+
+//fetch all Task for Admin
+router.get('/all', authMiddleware, async (req, res) => {
   try {
-    console.log("Getting All Tasks")
+    console.log("Getting All Tasks");
+
     const [rows] = await pool.query(
-      // `SELECT id, title, description, priority, status, due_date, assigned_to, created_by, audio_path, file_path, created_at
-      //  FROM tasks`
-      `SELECT * FROM tasks`
+      `SELECT t.task_id, t.title, t.description, t.priority, t.status, t.due_date,
+              COALESCE(tu.assigned_to, t.assigned_to) AS assigned_to,
+              t.created_by,
+              COALESCE(tu.updated_by, t.created_by) AS assigned_by,
+              COALESCE(tu.updated_at, t.created_at) AS last_updated_at,
+              t.audio_path, t.file_path, t.created_at
+       FROM tasks t
+       LEFT JOIN (
+         SELECT u1.task_id, u1.assigned_to, u1.updated_by, u1.updated_at
+         FROM task_updates u1
+         JOIN (
+           SELECT task_id, MAX(updated_at) as max_time
+           FROM task_updates
+           WHERE assigned_to IS NOT NULL
+           GROUP BY task_id
+         ) u2 ON u1.task_id = u2.task_id AND u1.updated_at = u2.max_time
+       ) tu ON t.task_id = tu.task_id`
     );
+
     res.json(rows);
   } catch (error) {
     console.error('Error fetching all tasks:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
+
 
 
 //All users in My Task Filter
@@ -229,6 +263,9 @@ router.post('/create', authMiddleware, upload, async (req, res) => {
       ]
     );
 
+    // ...after task insertion
+    await createNotification(assigned_to, `New task "${title}" has been assigned to you by ${created_by}`);
+
     res.status(201).json({ message: 'Task created successfully', taskId }); // Send custom taskId back
   } catch (error) {
     console.error('Error creating task:', error);
@@ -247,19 +284,34 @@ router.get('/assigned', authMiddleware, async (req, res) => {
     //   [username]
     // );
     const [rows] = await pool.query(
-      `SELECT t.*
-     FROM tasks t
-     LEFT JOIN (
-         SELECT u1.task_id, u1.assigned_to
-         FROM task_updates u1
-         JOIN (
-             SELECT task_id, MAX(updated_at) as max_time
-             FROM task_updates
-             WHERE assigned_to IS NOT NULL
-             GROUP BY task_id
-         ) u2 ON u1.task_id = u2.task_id AND u1.updated_at = u2.max_time
-     ) tu ON t.task_id = tu.task_id
-     WHERE COALESCE(tu.assigned_to, t.assigned_to) = ?`,
+      `SELECT t.*, 
+          COALESCE(tu.updated_by, t.created_by) AS assigned_by,
+          COALESCE(tu.updated_at, t.created_at) AS last_updated_at
+          FROM tasks t
+          LEFT JOIN (
+              SELECT u1.task_id, u1.assigned_to, u1.updated_by, u1.updated_at
+              FROM task_updates u1
+              JOIN (
+                  SELECT task_id, MAX(updated_at) as max_time
+                  FROM task_updates
+                  WHERE assigned_to IS NOT NULL
+                  GROUP BY task_id
+              ) u2 ON u1.task_id = u2.task_id AND u1.updated_at = u2.max_time
+          ) tu ON t.task_id = tu.task_id
+          WHERE COALESCE(tu.assigned_to, t.assigned_to) = ?`,
+      //   `SELECT t.*
+      //  FROM tasks t
+      //  LEFT JOIN (
+      //      SELECT u1.task_id, u1.assigned_to
+      //      FROM task_updates u1
+      //      JOIN (
+      //          SELECT task_id, MAX(updated_at) as max_time
+      //          FROM task_updates
+      //          WHERE assigned_to IS NOT NULL
+      //          GROUP BY task_id
+      //      ) u2 ON u1.task_id = u2.task_id AND u1.updated_at = u2.max_time
+      //  ) tu ON t.task_id = tu.task_id
+      //  WHERE COALESCE(tu.assigned_to, t.assigned_to) = ?`,
       [username]
     );
 
@@ -272,17 +324,48 @@ router.get('/assigned', authMiddleware, async (req, res) => {
 });
 
 // Get tasks created by the logged-in user (i.e., assigned by them)
+// router.get('/created-by-me', authMiddleware, async (req, res) => {
+//   try {
+//     const username = req.user.username;
+//     const [rows] = await pool.query(
+//       `SELECT task_id, title, description, priority, status, due_date, assigned_to, audio_path, file_path, created_at
+//        FROM tasks WHERE created_by = ?`,
+//       [username]
+//     );
+//     res.json(rows);
+//   } catch (error) {
+//     console.error('Error fetching assigned tasks:', error);
+//     res.status(500).json({ message: 'Server error' });
+//   }
+// });
+
 router.get('/created-by-me', authMiddleware, async (req, res) => {
   try {
     const username = req.user.username;
+
     const [rows] = await pool.query(
-      `SELECT task_id, title, description, priority, status, due_date, assigned_to, audio_path, file_path, created_at
-       FROM tasks WHERE created_by = ?`,
+      `SELECT t.task_id, t.title, t.description, t.priority, t.status, t.due_date,
+              COALESCE(tu.assigned_to, t.assigned_to) AS assigned_to,
+              COALESCE(tu.updated_at, t.created_at) AS last_updated_at,
+              t.audio_path, t.file_path, t.created_at
+       FROM tasks t
+       LEFT JOIN (
+         SELECT u1.task_id, u1.assigned_to, u1.updated_at
+         FROM task_updates u1
+         JOIN (
+           SELECT task_id, MAX(updated_at) as max_time
+           FROM task_updates
+           WHERE assigned_to IS NOT NULL
+           GROUP BY task_id
+         ) u2 ON u1.task_id = u2.task_id AND u1.updated_at = u2.max_time
+       ) tu ON t.task_id = tu.task_id
+       WHERE t.created_by = ?`,
       [username]
     );
+
     res.json(rows);
   } catch (error) {
-    console.error('Error fetching assigned tasks:', error);
+    console.error('Error fetching tasks created by user:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -369,6 +452,14 @@ router.put('/:taskId/update', authMiddleware, upload, async (req, res) => {
       [taskId, username, status, title || null, description || null, assigned_to || null, due_date || null, priority || null, audioPath, filePath, comment || null]
     );
 
+    const [taskRow] = await pool.query(`SELECT created_by FROM tasks WHERE task_id = ?`, [taskId]);
+    const creator = taskRow[0]?.created_by;
+
+    // Notify only if updater is not the creator
+    if (creator && creator !== username) {
+      await createNotification(creator, `Task "${title}" has been updated by ${username}`);
+    }
+
     res.json({ message: 'Task update recorded successfully' });
   } catch (err) {
     console.error('Update failed:', err);
@@ -410,7 +501,7 @@ router.get('/:taskId/progress', authMiddleware, async (req, res) => {
   try {
     // 1. Fetch original task
     const [taskRows] = await pool.query(
-      `SELECT title, description, created_by, assigned_to, status, priority, due_date, created_at
+      `SELECT title, description, created_by, assigned_to, status, priority, due_date, created_at, audio_path, file_path
        FROM tasks WHERE task_id = ?`,
       [taskId]
     );
