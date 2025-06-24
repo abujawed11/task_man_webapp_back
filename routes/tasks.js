@@ -263,6 +263,28 @@ router.post('/create', authMiddleware, upload, async (req, res) => {
       ]
     );
 
+    // Insert initial task snapshot into task_updates
+    await pool.query(
+      `INSERT INTO task_updates 
+    (task_id, updated_by, status, title, description, assigned_to, due_date, priority, audio_path, file_path, comment,       assigned_by, is_system_generated) 
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?)`,
+      [
+        taskId,
+        created_by,                 // updated_by
+        'Pending',                  // status
+        title || null,
+        description || null,
+        assigned_to || null,
+        due_date || null,
+        priority || 'Medium',
+        audioPath,
+        filePath,
+        'Initial task assignment',  // comment
+        created_by,
+        true                  // assigned_by
+      ]
+    );
+
     // ...after task insertion
     await createNotification(assigned_to, `New task "${title}" has been assigned to you by ${created_by}`);
 
@@ -432,6 +454,11 @@ if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 // });
 
 //Update task progress
+
+
+
+
+
 router.put('/:taskId/update', authMiddleware, upload, async (req, res) => {
   const taskId = req.params.taskId;
   const username = req.user.username;
@@ -441,26 +468,65 @@ router.put('/:taskId/update', authMiddleware, upload, async (req, res) => {
   const filePath = req.files?.file ? 'uploads/' + req.files.file[0].filename : null;
 
   try {
-    // 1. Update only status in tasks table
-    await pool.query(`UPDATE tasks SET status = ? WHERE task_id = ?`, [status, taskId]);
-
-    // 2. Insert everything else in task_updates table (full version snapshot)
-    await pool.query(
-      `INSERT INTO task_updates 
-        (task_id, updated_by, status, title, description, assigned_to, due_date, priority, audio_path, file_path, comment) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [taskId, username, status, title || null, description || null, assigned_to || null, due_date || null, priority || null, audioPath, filePath, comment || null]
+    // 1. Fetch current task details
+    const [taskRows] = await pool.query(
+      `SELECT assigned_to, title, created_by FROM tasks WHERE task_id = ?`,
+      [taskId]
     );
 
-    const [taskRow] = await pool.query(`SELECT created_by FROM tasks WHERE task_id = ?`, [taskId]);
-    const creator = taskRow[0]?.created_by;
+    const task = taskRows[0];
+    if (!task) return res.status(404).json({ message: 'Task not found' });
 
-    // Notify only if updater is not the creator
-    if (creator && creator !== username) {
-      await createNotification(creator, `Task "${title}" has been updated by ${username}`);
+    const isAssigneeChanged = assigned_to && assigned_to !== task.assigned_to;
+
+    // 2. Update tasks table with latest status and possibly assignee
+    if (isAssigneeChanged) {
+      await pool.query(
+        `UPDATE tasks SET status = ?, assigned_to = ?, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?`,
+        [status, assigned_to, taskId]
+      );
+    } else {
+      await pool.query(
+        `UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?`,
+        [status, taskId]
+      );
     }
 
-    res.json({ message: 'Task update recorded successfully' });
+    // 3. Insert update into task_updates table (audit history)
+    await pool.query(
+      `INSERT INTO task_updates 
+        (task_id, updated_by, status, title, description, assigned_to, due_date, priority, audio_path, file_path, comment${isAssigneeChanged ? ', assigned_by' : ''}) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?${isAssigneeChanged ? ', ?' : ''})`,
+      [
+        taskId,
+        username,
+        status,
+        title || null,
+        description || null,
+        assigned_to || null,
+        due_date || null,
+        priority || null,
+        audioPath,
+        filePath,
+        comment || null,
+        ...(isAssigneeChanged ? [username] : [])
+      ]
+    );
+
+
+
+    // 4. Notify task creator if someone else updated it
+    if (task.created_by && task.created_by !== username) {
+      await createNotification(task.created_by, `Task "${task.title}" updated by ${username}`);
+    }
+
+    // 5. Notify new assignee if changed
+    if (isAssigneeChanged && assigned_to !== username) {
+      await createNotification(assigned_to, `You were assigned task "${task.title}" by ${username}`);
+    }
+
+    res.json({ message: 'Task updated and history recorded successfully' });
+
   } catch (err) {
     console.error('Update failed:', err);
     res.status(500).json({ message: 'Server error' });
@@ -468,33 +534,109 @@ router.put('/:taskId/update', authMiddleware, upload, async (req, res) => {
 });
 
 
-// Get task progress timeline
+
 // router.get('/:taskId/progress', authMiddleware, async (req, res) => {
 //   const { taskId } = req.params;
 
 //   try {
-//     const [updates] = await pool.query(
-//       `SELECT 
-//          updated_by, 
-//          status, 
-//          comment, 
-//          audio_path, 
-//          file_path, 
-//          updated_at 
-//        FROM task_updates 
-//        WHERE task_id = ? 
-//        ORDER BY updated_at ASC`,
+//     // 1. Fetch original task
+//     const [taskRows] = await pool.query(
+//       `SELECT title, description, created_by, assigned_to, status, priority, due_date, created_at, audio_path, file_path
+//        FROM tasks WHERE task_id = ?`,
 //       [taskId]
 //     );
 
-//     res.status(200).json(updates);
-//   } catch (error) {
-//     console.error('Error fetching task progress:', error);
-//     res.status(500).json({ message: 'Failed to fetch task progress' });
+//     if (taskRows.length === 0) return res.status(404).json({ message: 'Task not found' });
+
+//     const originalTask = taskRows[0];
+//     let previousAssignee = originalTask.assigned_to;
+
+//     // 2. Fetch updates (JOIN with users for assigner and assignee names)
+//     const [updates] = await pool.query(
+//       `SELECT 
+//           tu.updated_by,
+//           u1.username AS updated_by_username,
+//           tu.assigned_to,
+//           u2.username AS assigned_to_username,
+//           tu.assigned_by,
+//           u3.username AS assigned_by_username,
+//           tu.status,
+//           tu.comment,
+//           tu.audio_path,
+//           tu.file_path,
+//           tu.updated_at
+//        FROM task_updates tu
+//        LEFT JOIN users u1 ON tu.updated_by = u1.username
+//        LEFT JOIN users u2 ON tu.assigned_to = u2.username
+//        LEFT JOIN users u3 ON tu.assigned_by = u3.username
+//        WHERE tu.task_id = ?
+//        ORDER BY tu.updated_at ASC`,
+//       [taskId]
+//     );
+
+//     // 3. Attach previous_assigned_to dynamically
+//     const enriched = updates.map((update) => {
+//       const current = { ...update };
+//       if (current.assigned_to && current.assigned_to !== previousAssignee) {
+//         current.previous_assigned_to = previousAssignee;
+//         previousAssignee = current.assigned_to;
+//       } else {
+//         current.previous_assigned_to = null;
+//       }
+//       return current;
+//     });
+
+//     res.json({
+//       task: originalTask,
+//       updates: enriched,
+//     });
+
+//   } catch (err) {
+//     console.error('Error fetching task progress:', err);
+//     res.status(500).json({ message: 'Server error' });
 //   }
 // });
 
-// In tasks.js
+
+
+// router.put('/:taskId/update', authMiddleware, upload, async (req, res) => {
+//   const taskId = req.params.taskId;
+//   const username = req.user.username;
+//   const { status, title, description, due_date, priority, comment, assigned_to } = req.body;
+
+//   const audioPath = req.files?.audio ? 'uploads/' + req.files.audio[0].filename : null;
+//   const filePath = req.files?.file ? 'uploads/' + req.files.file[0].filename : null;
+
+//   try {
+//     // 1. Update only status in tasks table
+//     await pool.query(`UPDATE tasks SET status = ? WHERE task_id = ?`, [status, taskId]);
+
+//     // 2. Insert everything else in task_updates table (full version snapshot)
+//     await pool.query(
+//       `INSERT INTO task_updates 
+//         (task_id, updated_by, status, title, description, assigned_to, due_date, priority, audio_path, file_path, comment) 
+//        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+//       [taskId, username, status, title || null, description || null, assigned_to || null, due_date || null, priority || null, audioPath, filePath, comment || null]
+//     );
+
+//     const [taskRow] = await pool.query(`SELECT created_by FROM tasks WHERE task_id = ?`, [taskId]);
+//     const creator = taskRow[0]?.created_by;
+
+//     // Notify only if updater is not the creator
+//     if (creator && creator !== username) {
+//       await createNotification(creator, `Task "${title}" has been updated by ${username}`);
+//     }
+
+//     res.json({ message: 'Task update recorded successfully' });
+//   } catch (err) {
+//     console.error('Update failed:', err);
+//     res.status(500).json({ message: 'Server error' });
+//   }
+// });
+
+
+
+// progress
 router.get('/:taskId/progress', authMiddleware, async (req, res) => {
   const { taskId } = req.params;
 
@@ -505,20 +647,53 @@ router.get('/:taskId/progress', authMiddleware, async (req, res) => {
        FROM tasks WHERE task_id = ?`,
       [taskId]
     );
-    if (taskRows.length === 0) {
-      return res.status(404).json({ message: 'Task not found' });
-    }
+
+    if (taskRows.length === 0) return res.status(404).json({ message: 'Task not found' });
 
     const originalTask = taskRows[0];
+    let previousAssignee = originalTask.assigned_to;
 
-    // 2. Fetch updates
+    // 2. Fetch updates with user info and is_system_generated
     const [updates] = await pool.query(
-      `SELECT updated_by, status, assigned_to, comment, audio_path, file_path, updated_at
-       FROM task_updates WHERE task_id = ? ORDER BY updated_at ASC`,
+      `SELECT 
+          tu.updated_by,
+          u1.username AS updated_by_username,
+          tu.assigned_to,
+          u2.username AS assigned_to_username,
+          tu.assigned_by,
+          u3.username AS assigned_by_username,
+          tu.status,
+          tu.comment,
+          tu.audio_path,
+          tu.file_path,
+          tu.updated_at,
+          tu.is_system_generated          -- ✅ Include this in select
+       FROM task_updates tu
+       LEFT JOIN users u1 ON tu.updated_by = u1.username
+       LEFT JOIN users u2 ON tu.assigned_to = u2.username
+       LEFT JOIN users u3 ON tu.assigned_by = u3.username
+       WHERE tu.task_id = ?
+       ORDER BY tu.updated_at ASC`,
       [taskId]
     );
 
-    res.json({ task: originalTask, updates });
+    // 3. Attach previous_assigned_to dynamically
+    const enriched = updates.map((update) => {
+      const current = { ...update };
+      if (current.assigned_to && current.assigned_to !== previousAssignee) {
+        current.previous_assigned_to = previousAssignee;
+        previousAssignee = current.assigned_to;
+      } else {
+        current.previous_assigned_to = null;
+      }
+      return current;
+    });
+
+    res.json({
+      task: originalTask,
+      updates: enriched,
+    });
+
   } catch (err) {
     console.error('Error fetching task progress:', err);
     res.status(500).json({ message: 'Server error' });
@@ -526,19 +701,138 @@ router.get('/:taskId/progress', authMiddleware, async (req, res) => {
 });
 
 
-// Get all tasks (Super Admin only)
-// router.get('/all', authMiddleware, superAdminMiddleware, async (req, res) => {
+
+
+//working-------------------
+// router.get('/:taskId/progress', authMiddleware, async (req, res) => {
+//   const { taskId } = req.params;
+
 //   try {
-//     const [rows] = await pool.query(
-//       `SELECT id, title, description, priority, status, due_date, assigned_to, created_by, audio_path, file_path, created_at
-//        FROM tasks`
+//     // 1. Fetch original task
+//     const [taskRows] = await pool.query(
+//       `SELECT title, description, created_by, assigned_to, status, priority, due_date, created_at, audio_path, file_path
+//        FROM tasks WHERE task_id = ?`,
+//       [taskId]
 //     );
-//     res.json(rows);
-//   } catch (error) {
-//     console.error('Error fetching all tasks:', error);
+
+//     if (taskRows.length === 0) return res.status(404).json({ message: 'Task not found' });
+
+//     const originalTask = taskRows[0];
+//     let previousAssignee = originalTask.assigned_to;
+
+//     // 2. Fetch updates (JOIN with users for assigner and assignee names)
+//     const [updates] = await pool.query(
+//       `SELECT 
+//           tu.updated_by,
+//           u1.username AS updated_by_username,
+//           tu.assigned_to,
+//           u2.username AS assigned_to_username,
+//           tu.assigned_by,
+//           u3.username AS assigned_by_username,
+//           tu.status,
+//           tu.comment,
+//           tu.audio_path,
+//           tu.file_path,
+//           tu.updated_at
+//        FROM task_updates tu
+//        LEFT JOIN users u1 ON tu.updated_by = u1.username
+//        LEFT JOIN users u2 ON tu.assigned_to = u2.username
+//        LEFT JOIN users u3 ON tu.assigned_by = u3.username
+//        WHERE tu.task_id = ?
+//        ORDER BY tu.updated_at ASC`,
+//       [taskId]
+//     );
+
+//     // 3. Attach previous_assigned_to dynamically
+//     const enriched = updates.map((update) => {
+//       const current = { ...update };
+//       if (current.assigned_to && current.assigned_to !== previousAssignee) {
+//         current.previous_assigned_to = previousAssignee;
+//         previousAssignee = current.assigned_to;
+//       } else {
+//         current.previous_assigned_to = null;
+//       }
+//       return current;
+//     });
+
+//     res.json({
+//       task: originalTask,
+//       updates: enriched,
+//     });
+
+//   } catch (err) {
+//     console.error('Error fetching task progress:', err);
 //     res.status(500).json({ message: 'Server error' });
 //   }
 // });
+
+
+
+
+//working---------------------
+// router.get('/:taskId/progress', authMiddleware, async (req, res) => {
+//   const { taskId } = req.params;
+
+//   try {
+//     // 1. Fetch original task (include updated_at for frontend)
+//     const [taskRows] = await pool.query(
+//       `SELECT title, description, created_by, assigned_to, status, priority, due_date, created_at, updated_at, audio_path, file_path
+//        FROM tasks WHERE task_id = ?`,
+//       [taskId]
+//     );
+//     if (taskRows.length === 0) {
+//       return res.status(404).json({ message: 'Task not found' });
+//     }
+
+//     const originalTask = taskRows[0];
+
+//     // 2. Fetch task update history (include assigned_by)
+//     const [updates] = await pool.query(
+//       `SELECT updated_by, assigned_to, assigned_by, status, comment, audio_path, file_path, updated_at
+//        FROM task_updates WHERE task_id = ? ORDER BY updated_at ASC`,
+//       [taskId]
+//     );
+
+//     res.json({ task: originalTask, updates });
+//   } catch (err) {
+//     console.error('Error fetching task progress:', err);
+//     res.status(500).json({ message: 'Server error' });
+//   }
+// });
+
+
+
+
+// router.get('/:taskId/progress', authMiddleware, async (req, res) => {
+//   const { taskId } = req.params;
+
+//   try {
+//     // 1. Fetch original task
+//     const [taskRows] = await pool.query(
+//       `SELECT title, description, created_by, assigned_to, status, priority, due_date, created_at, audio_path, file_path
+//        FROM tasks WHERE task_id = ?`,
+//       [taskId]
+//     );
+//     if (taskRows.length === 0) {
+//       return res.status(404).json({ message: 'Task not found' });
+//     }
+
+//     const originalTask = taskRows[0];
+
+//     // 2. Fetch updates
+//     const [updates] = await pool.query(
+//       `SELECT updated_by, status, assigned_to, comment, audio_path, file_path, updated_at
+//        FROM task_updates WHERE task_id = ? ORDER BY updated_at ASC`,
+//       [taskId]
+//     );
+
+//     res.json({ task: originalTask, updates });
+//   } catch (err) {
+//     console.error('Error fetching task progress:', err);
+//     res.status(500).json({ message: 'Server error' });
+//   }
+// });
+
 
 
 
