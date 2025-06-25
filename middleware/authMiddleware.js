@@ -28,3 +28,5 @@ module.exports = authMiddleware;
 //   }
 //   next();
 // };
+
+// module.exports = {authMiddleware,superAdminMiddleware}
