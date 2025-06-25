@@ -346,51 +346,51 @@ router.get('/assigned', authMiddleware, async (req, res) => {
 });
 
 // Get tasks created by the logged-in user (i.e., assigned by them)
-// router.get('/created-by-me', authMiddleware, async (req, res) => {
-//   try {
-//     const username = req.user.username;
-//     const [rows] = await pool.query(
-//       `SELECT task_id, title, description, priority, status, due_date, assigned_to, audio_path, file_path, created_at
-//        FROM tasks WHERE created_by = ?`,
-//       [username]
-//     );
-//     res.json(rows);
-//   } catch (error) {
-//     console.error('Error fetching assigned tasks:', error);
-//     res.status(500).json({ message: 'Server error' });
-//   }
-// });
-
 router.get('/created-by-me', authMiddleware, async (req, res) => {
   try {
     const username = req.user.username;
-
     const [rows] = await pool.query(
-      `SELECT t.task_id, t.title, t.description, t.priority, t.status, t.due_date,
-              COALESCE(tu.assigned_to, t.assigned_to) AS assigned_to,
-              COALESCE(tu.updated_at, t.created_at) AS last_updated_at,
-              t.audio_path, t.file_path, t.created_at
-       FROM tasks t
-       LEFT JOIN (
-         SELECT u1.task_id, u1.assigned_to, u1.updated_at
-         FROM task_updates u1
-         JOIN (
-           SELECT task_id, MAX(updated_at) as max_time
-           FROM task_updates
-           WHERE assigned_to IS NOT NULL
-           GROUP BY task_id
-         ) u2 ON u1.task_id = u2.task_id AND u1.updated_at = u2.max_time
-       ) tu ON t.task_id = tu.task_id
-       WHERE t.created_by = ?`,
+      `SELECT task_id, title, description, priority, status, due_date, assigned_to, audio_path, file_path, created_at, updated_at
+       FROM tasks WHERE created_by = ?`,
       [username]
     );
-
     res.json(rows);
   } catch (error) {
-    console.error('Error fetching tasks created by user:', error);
+    console.error('Error fetching assigned tasks:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
+
+// router.get('/created-by-me', authMiddleware, async (req, res) => {
+//   try {
+//     const username = req.user.username;
+
+//     const [rows] = await pool.query(
+//       `SELECT t.task_id, t.title, t.description, t.priority, t.status, t.due_date,
+//               COALESCE(tu.assigned_to, t.assigned_to) AS assigned_to,
+//               COALESCE(tu.updated_at, t.created_at) AS last_updated_at,
+//               t.audio_path, t.file_path, t.created_at
+//        FROM tasks t
+//        LEFT JOIN (
+//          SELECT u1.task_id, u1.assigned_to, u1.updated_at
+//          FROM task_updates u1
+//          JOIN (
+//            SELECT task_id, MAX(updated_at) as max_time
+//            FROM task_updates
+//            WHERE assigned_to IS NOT NULL
+//            GROUP BY task_id
+//          ) u2 ON u1.task_id = u2.task_id AND u1.updated_at = u2.max_time
+//        ) tu ON t.task_id = tu.task_id
+//        WHERE t.created_by = ?`,
+//       [username]
+//     );
+
+//     res.json(rows);
+//   } catch (error) {
+//     console.error('Error fetching tasks created by user:', error);
+//     res.status(500).json({ message: 'Server error' });
+//   }
+// });
 
 // GET a single task by ID
 router.get('/:taskId', authMiddleware, async (req, res) => {
