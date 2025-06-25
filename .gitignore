@@ -39,7 +39,7 @@ dist/
 build/
 
 # MySQL dump files or backups
-*.sql
+
 *.sql.gz
 *.dump
 

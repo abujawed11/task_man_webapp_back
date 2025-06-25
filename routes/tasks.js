@@ -307,20 +307,35 @@ router.get('/assigned', authMiddleware, async (req, res) => {
     // );
     const [rows] = await pool.query(
       `SELECT t.*, 
-          COALESCE(tu.updated_by, t.created_by) AS assigned_by,
-          COALESCE(tu.updated_at, t.created_at) AS last_updated_at
-          FROM tasks t
-          LEFT JOIN (
-              SELECT u1.task_id, u1.assigned_to, u1.updated_by, u1.updated_at
-              FROM task_updates u1
-              JOIN (
-                  SELECT task_id, MAX(updated_at) as max_time
-                  FROM task_updates
-                  WHERE assigned_to IS NOT NULL
-                  GROUP BY task_id
-              ) u2 ON u1.task_id = u2.task_id AND u1.updated_at = u2.max_time
-          ) tu ON t.task_id = tu.task_id
-          WHERE COALESCE(tu.assigned_to, t.assigned_to) = ?`,
+              COALESCE(tu.assigned_by, t.created_by) AS assigned_by,
+              COALESCE(tu.updated_at, t.created_at) AS last_updated_at
+        FROM tasks t
+        LEFT JOIN (
+            SELECT u1.task_id, u1.assigned_to, u1.assigned_by, u1.updated_at
+            FROM task_updates u1
+            JOIN (
+                SELECT task_id, MAX(updated_at) as max_time
+                FROM task_updates
+                WHERE assigned_to IS NOT NULL
+                GROUP BY task_id
+            ) u2 ON u1.task_id = u2.task_id AND u1.updated_at = u2.max_time
+        ) tu ON t.task_id = tu.task_id
+        WHERE COALESCE(tu.assigned_to, t.assigned_to) = ?`,
+      // `SELECT t.*, 
+      //     COALESCE(tu.updated_by, t.created_by) AS assigned_by,
+      //     COALESCE(tu.updated_at, t.created_at) AS last_updated_at
+      //     FROM tasks t
+      //     LEFT JOIN (
+      //         SELECT u1.task_id, u1.assigned_to, u1.updated_by, u1.updated_at
+      //         FROM task_updates u1
+      //         JOIN (
+      //             SELECT task_id, MAX(updated_at) as max_time
+      //             FROM task_updates
+      //             WHERE assigned_to IS NOT NULL
+      //             GROUP BY task_id
+      //         ) u2 ON u1.task_id = u2.task_id AND u1.updated_at = u2.max_time
+      //     ) tu ON t.task_id = tu.task_id
+      //     WHERE COALESCE(tu.assigned_to, t.assigned_to) = ?`,
       //   `SELECT t.*
       //  FROM tasks t
       //  LEFT JOIN (
@@ -398,8 +413,27 @@ router.get('/:taskId', authMiddleware, async (req, res) => {
 
   try {
     const [rows] = await pool.query(
-      `SELECT task_id, title, description, priority, status, due_date, created_by, assigned_to, audio_path, file_path, created_at
-       FROM tasks WHERE task_id = ?`,
+      `SELECT 
+         t.task_id, 
+         t.title, 
+         t.description, 
+         t.priority, 
+         t.status, 
+         t.due_date, 
+         t.created_by, 
+         t.assigned_to, 
+         t.audio_path, 
+         t.file_path, 
+         t.created_at,
+         tu.assigned_by
+       FROM tasks t
+       LEFT JOIN task_updates tu 
+         ON tu.task_id = t.task_id 
+        AND tu.id = (
+          SELECT MAX(id) FROM task_updates 
+          WHERE task_id = t.task_id AND assigned_to IS NOT NULL
+        )
+       WHERE t.task_id = ?`,
       [taskId]
     );
 
@@ -413,6 +447,30 @@ router.get('/:taskId', authMiddleware, async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
+
+
+
+//working-------------------------------
+// router.get('/:taskId', authMiddleware, async (req, res) => {
+//   const taskId = req.params.taskId;
+
+//   try {
+//     const [rows] = await pool.query(
+//       `SELECT task_id, title, description, priority, status, due_date, created_by, assigned_to, audio_path, file_path, created_at
+//        FROM tasks WHERE task_id = ?`,
+//       [taskId]
+//     );
+
+//     if (rows.length === 0) {
+//       return res.status(404).json({ message: 'Task not found' });
+//     }
+
+//     res.json(rows[0]);
+//   } catch (error) {
+//     console.error('Error fetching task by ID:', error);
+//     res.status(500).json({ message: 'Server error' });
+//   }
+// });
 
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
@@ -454,11 +512,6 @@ if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 // });
 
 //Update task progress
-
-
-
-
-
 router.put('/:taskId/update', authMiddleware, upload, async (req, res) => {
   const taskId = req.params.taskId;
   const username = req.user.username;
@@ -479,7 +532,7 @@ router.put('/:taskId/update', authMiddleware, upload, async (req, res) => {
 
     const isAssigneeChanged = assigned_to && assigned_to !== task.assigned_to;
 
-    // 2. Update tasks table with latest status and possibly assignee
+    // 2. Update tasks table
     if (isAssigneeChanged) {
       await pool.query(
         `UPDATE tasks SET status = ?, assigned_to = ?, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?`,
@@ -492,11 +545,25 @@ router.put('/:taskId/update', authMiddleware, upload, async (req, res) => {
       );
     }
 
-    // 3. Insert update into task_updates table (audit history)
+    // 3. Fetch last known assigned_by if available
+    let assignedByToInsert = null;
+    if (isAssigneeChanged) {
+      assignedByToInsert = username;
+    } else {
+      const [lastAssignRow] = await pool.query(
+        `SELECT assigned_by FROM task_updates 
+         WHERE task_id = ? AND assigned_by IS NOT NULL 
+         ORDER BY updated_at DESC LIMIT 1`,
+        [taskId]
+      );
+      assignedByToInsert = lastAssignRow[0]?.assigned_by || null;
+    }
+
+    // 4. Insert into task_updates
     await pool.query(
       `INSERT INTO task_updates 
-        (task_id, updated_by, status, title, description, assigned_to, due_date, priority, audio_path, file_path, comment${isAssigneeChanged ? ', assigned_by' : ''}) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?${isAssigneeChanged ? ', ?' : ''})`,
+        (task_id, updated_by, status, title, description, assigned_to, due_date, priority, audio_path, file_path, comment, assigned_by) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         taskId,
         username,
@@ -509,18 +576,15 @@ router.put('/:taskId/update', authMiddleware, upload, async (req, res) => {
         audioPath,
         filePath,
         comment || null,
-        ...(isAssigneeChanged ? [username] : [])
+        assignedByToInsert
       ]
     );
 
-
-
-    // 4. Notify task creator if someone else updated it
+    // 5. Notifications
     if (task.created_by && task.created_by !== username) {
       await createNotification(task.created_by, `Task "${task.title}" updated by ${username}`);
     }
 
-    // 5. Notify new assignee if changed
     if (isAssigneeChanged && assigned_to !== username) {
       await createNotification(assigned_to, `You were assigned task "${task.title}" by ${username}`);
     }
@@ -532,6 +596,89 @@ router.put('/:taskId/update', authMiddleware, upload, async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
+
+
+
+
+
+
+
+
+//working----------------------------------------------
+
+// router.put('/:taskId/update', authMiddleware, upload, async (req, res) => {
+//   const taskId = req.params.taskId;
+//   const username = req.user.username;
+//   const { status, title, description, due_date, priority, comment, assigned_to } = req.body;
+
+//   const audioPath = req.files?.audio ? 'uploads/' + req.files.audio[0].filename : null;
+//   const filePath = req.files?.file ? 'uploads/' + req.files.file[0].filename : null;
+
+//   try {
+//     // 1. Fetch current task details
+//     const [taskRows] = await pool.query(
+//       `SELECT assigned_to, title, created_by FROM tasks WHERE task_id = ?`,
+//       [taskId]
+//     );
+
+//     const task = taskRows[0];
+//     if (!task) return res.status(404).json({ message: 'Task not found' });
+
+//     const isAssigneeChanged = assigned_to && assigned_to !== task.assigned_to;
+
+//     // 2. Update tasks table with latest status and possibly assignee
+//     if (isAssigneeChanged) {
+//       await pool.query(
+//         `UPDATE tasks SET status = ?, assigned_to = ?, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?`,
+//         [status, assigned_to, taskId]
+//       );
+//     } else {
+//       await pool.query(
+//         `UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?`,
+//         [status, taskId]
+//       );
+//     }
+
+//     // 3. Insert update into task_updates table (audit history)
+//     await pool.query(
+//       `INSERT INTO task_updates 
+//         (task_id, updated_by, status, title, description, assigned_to, due_date, priority, audio_path, file_path, comment${isAssigneeChanged ? ', assigned_by' : ''}) 
+//        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?${isAssigneeChanged ? ', ?' : ''})`,
+//       [
+//         taskId,
+//         username,
+//         status,
+//         title || null,
+//         description || null,
+//         assigned_to || null,
+//         due_date || null,
+//         priority || null,
+//         audioPath,
+//         filePath,
+//         comment || null,
+//         ...(isAssigneeChanged ? [username] : [])
+//       ]
+//     );
+
+
+
+//     // 4. Notify task creator if someone else updated it
+//     if (task.created_by && task.created_by !== username) {
+//       await createNotification(task.created_by, `Task "${task.title}" updated by ${username}`);
+//     }
+
+//     // 5. Notify new assignee if changed
+//     if (isAssigneeChanged && assigned_to !== username) {
+//       await createNotification(assigned_to, `You were assigned task "${task.title}" by ${username}`);
+//     }
+
+//     res.json({ message: 'Task updated and history recorded successfully' });
+
+//   } catch (err) {
+//     console.error('Update failed:', err);
+//     res.status(500).json({ message: 'Server error' });
+//   }
+// });
 
 
 
