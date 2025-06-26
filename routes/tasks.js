@@ -605,11 +605,6 @@ if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
 
 
-
-
-
-//working----------------------------------------------
-
 router.put('/:taskId/update', authMiddleware, upload, async (req, res) => {
   const taskId = req.params.taskId;
   const username = req.user.username;
@@ -619,34 +614,73 @@ router.put('/:taskId/update', authMiddleware, upload, async (req, res) => {
   const filePath = req.files?.file ? 'uploads/' + req.files.file[0].filename : null;
 
   try {
-    // 1. Fetch current task details
+    // 1. Fetch task + account_type in one JOIN
     const [taskRows] = await pool.query(
-      `SELECT assigned_to, title, created_by FROM tasks WHERE task_id = ?`,
-      [taskId]
+      `SELECT t.*, u.account_type 
+       FROM tasks t 
+       JOIN users u ON u.username = ? 
+       WHERE t.task_id = ?`,
+      [username, taskId]
     );
 
     const task = taskRows[0];
     if (!task) return res.status(404).json({ message: 'Task not found' });
 
-    const isAssigneeChanged = assigned_to && assigned_to !== task.assigned_to;
+    const isPrivilegedUser = (task.created_by === username || task.account_type === 'Super Admin');
 
-    // 2. Update tasks table with latest status and possibly assignee
-    if (isAssigneeChanged) {
-      await pool.query(
-        `UPDATE tasks SET status = ?, assigned_to = ?, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?`,
-        [status, assigned_to, taskId]
-      );
+    // 2. If privileged, compare and update changed fields
+    if (isPrivilegedUser) {
+      const updates = [];
+      const values = [];
+
+      if (title && title !== task.title) {
+        updates.push('title = ?');
+        values.push(title);
+      }
+      if (description && description !== task.description) {
+        updates.push('description = ?');
+        values.push(description);
+      }
+      if (priority && priority !== task.priority) {
+        updates.push('priority = ?');
+        values.push(priority);
+      }
+      if (status && status !== task.status) {
+        updates.push('status = ?');
+        values.push(status);
+      }
+      if (due_date && due_date !== task.due_date?.toISOString().split('T')[0]) {
+        updates.push('due_date = ?');
+        values.push(due_date);
+      }
+      if (assigned_to && assigned_to !== task.assigned_to) {
+        updates.push('assigned_to = ?');
+        values.push(assigned_to);
+      }
+
+      if (updates.length > 0) {
+        updates.push('updated_at = CURRENT_TIMESTAMP');
+        await pool.query(
+          `UPDATE tasks SET ${updates.join(', ')} WHERE task_id = ?`,
+          [...values, taskId]
+        );
+      }
     } else {
-      await pool.query(
-        `UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?`,
-        [status, taskId]
-      );
+      // If not privileged, allow only status update
+      if (status && status !== task.status) {
+        await pool.query(
+          `UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?`,
+          [status, taskId]
+        );
+      }
     }
 
-    // 3. Insert update into task_updates table (audit history)
+    // 3. Insert into task_updates log (always)
+    const isAssigneeChanged = assigned_to && assigned_to !== task.assigned_to;
+
     await pool.query(
       `INSERT INTO task_updates 
-        (task_id, updated_by, status, title, description, assigned_to, due_date, priority, audio_path, file_path, comment${isAssigneeChanged ? ', assigned_by' : ''}) 
+       (task_id, updated_by, status, title, description, assigned_to, due_date, priority, audio_path, file_path, comment${isAssigneeChanged ? ', assigned_by' : ''}) 
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?${isAssigneeChanged ? ', ?' : ''})`,
       [
         taskId,
@@ -663,8 +697,6 @@ router.put('/:taskId/update', authMiddleware, upload, async (req, res) => {
         ...(isAssigneeChanged ? [username] : [])
       ]
     );
-
-
 
     // 4. Notify task creator if someone else updated it
     if (task.created_by && task.created_by !== username) {
@@ -683,6 +715,83 @@ router.put('/:taskId/update', authMiddleware, upload, async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
+
+
+//working----------------------------------------------
+
+// router.put('/:taskId/update', authMiddleware, upload, async (req, res) => {
+//   const taskId = req.params.taskId;
+//   const username = req.user.username;
+//   const { status, title, description, due_date, priority, comment, assigned_to } = req.body;
+
+//   const audioPath = req.files?.audio ? 'uploads/' + req.files.audio[0].filename : null;
+//   const filePath = req.files?.file ? 'uploads/' + req.files.file[0].filename : null;
+
+//   try {
+//     // 1. Fetch current task details
+//     const [taskRows] = await pool.query(
+//       `SELECT assigned_to, title, created_by FROM tasks WHERE task_id = ?`,
+//       [taskId]
+//     );
+
+//     const task = taskRows[0];
+//     if (!task) return res.status(404).json({ message: 'Task not found' });
+
+//     const isAssigneeChanged = assigned_to && assigned_to !== task.assigned_to;
+
+//     // 2. Update tasks table with latest status and possibly assignee
+//     if (isAssigneeChanged) {
+//       await pool.query(
+//         `UPDATE tasks SET status = ?, assigned_to = ?, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?`,
+//         [status, assigned_to, taskId]
+//       );
+//     } else {
+//       await pool.query(
+//         `UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?`,
+//         [status, taskId]
+//       );
+//     }
+
+//     // 3. Insert update into task_updates table (audit history)
+//     await pool.query(
+//       `INSERT INTO task_updates 
+//         (task_id, updated_by, status, title, description, assigned_to, due_date, priority, audio_path, file_path, comment${isAssigneeChanged ? ', assigned_by' : ''}) 
+//        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?${isAssigneeChanged ? ', ?' : ''})`,
+//       [
+//         taskId,
+//         username,
+//         status,
+//         title || null,
+//         description || null,
+//         assigned_to || null,
+//         due_date || null,
+//         priority || null,
+//         audioPath,
+//         filePath,
+//         comment || null,
+//         ...(isAssigneeChanged ? [username] : [])
+//       ]
+//     );
+
+
+
+//     // 4. Notify task creator if someone else updated it
+//     if (task.created_by && task.created_by !== username) {
+//       await createNotification(task.created_by, `Task "${task.title}" updated by ${username}`);
+//     }
+
+//     // 5. Notify new assignee if changed
+//     if (isAssigneeChanged && assigned_to !== username) {
+//       await createNotification(assigned_to, `You were assigned task "${task.title}" by ${username}`);
+//     }
+
+//     res.json({ message: 'Task updated and history recorded successfully' });
+
+//   } catch (err) {
+//     console.error('Update failed:', err);
+//     res.status(500).json({ message: 'Server error' });
+//   }
+// });
 
 
 
@@ -804,7 +913,7 @@ router.get('/:taskId/progress', authMiddleware, async (req, res) => {
     const originalTask = taskRows[0];
     let previousAssignee = originalTask.assigned_to;
 
-    // 2. Fetch updates with user info and is_system_generated
+    // 2. Fetch all updates (added missing fields: title, description, due_date, priority)
     const [updates] = await pool.query(
       `SELECT 
           tu.updated_by,
@@ -817,8 +926,12 @@ router.get('/:taskId/progress', authMiddleware, async (req, res) => {
           tu.comment,
           tu.audio_path,
           tu.file_path,
+          tu.title,
+          tu.description,
+          tu.due_date,
+          tu.priority,
           tu.updated_at,
-          tu.is_system_generated          -- ✅ Include this in select
+          tu.is_system_generated
        FROM task_updates tu
        LEFT JOIN users u1 ON tu.updated_by = u1.username
        LEFT JOIN users u2 ON tu.assigned_to = u2.username
@@ -828,7 +941,7 @@ router.get('/:taskId/progress', authMiddleware, async (req, res) => {
       [taskId]
     );
 
-    // 3. Attach previous_assigned_to dynamically
+    // 3. Track previous assignee
     const enriched = updates.map((update) => {
       const current = { ...update };
       if (current.assigned_to && current.assigned_to !== previousAssignee) {
@@ -850,6 +963,71 @@ router.get('/:taskId/progress', authMiddleware, async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
+
+
+//-working-------------------------------------------------------
+// router.get('/:taskId/progress', authMiddleware, async (req, res) => {
+//   const { taskId } = req.params;
+
+//   try {
+//     // 1. Fetch original task
+//     const [taskRows] = await pool.query(
+//       `SELECT title, description, created_by, assigned_to, status, priority, due_date, created_at, audio_path, file_path
+//        FROM tasks WHERE task_id = ?`,
+//       [taskId]
+//     );
+
+//     if (taskRows.length === 0) return res.status(404).json({ message: 'Task not found' });
+
+//     const originalTask = taskRows[0];
+//     let previousAssignee = originalTask.assigned_to;
+
+//     // 2. Fetch updates with user info and is_system_generated
+//     const [updates] = await pool.query(
+//       `SELECT 
+//           tu.updated_by,
+//           u1.username AS updated_by_username,
+//           tu.assigned_to,
+//           u2.username AS assigned_to_username,
+//           tu.assigned_by,
+//           u3.username AS assigned_by_username,
+//           tu.status,
+//           tu.comment,
+//           tu.audio_path,
+//           tu.file_path,
+//           tu.updated_at,
+//           tu.is_system_generated          -- ✅ Include this in select
+//        FROM task_updates tu
+//        LEFT JOIN users u1 ON tu.updated_by = u1.username
+//        LEFT JOIN users u2 ON tu.assigned_to = u2.username
+//        LEFT JOIN users u3 ON tu.assigned_by = u3.username
+//        WHERE tu.task_id = ?
+//        ORDER BY tu.updated_at ASC`,
+//       [taskId]
+//     );
+
+//     // 3. Attach previous_assigned_to dynamically
+//     const enriched = updates.map((update) => {
+//       const current = { ...update };
+//       if (current.assigned_to && current.assigned_to !== previousAssignee) {
+//         current.previous_assigned_to = previousAssignee;
+//         previousAssignee = current.assigned_to;
+//       } else {
+//         current.previous_assigned_to = null;
+//       }
+//       return current;
+//     });
+
+//     res.json({
+//       task: originalTask,
+//       updates: enriched,
+//     });
+
+//   } catch (err) {
+//     console.error('Error fetching task progress:', err);
+//     res.status(500).json({ message: 'Server error' });
+//   }
+// });
 
 
 
