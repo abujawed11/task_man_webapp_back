@@ -226,59 +226,109 @@ const pool = require('../config/db');
 const router = express.Router();
 const authMiddleware = require('../middleware/authMiddleware');
 const { generateId } = require('../utils/idGenerator');
+const sgMail = require('@sendgrid/mail');
 
 
 require('dotenv').config();
 
 // Configure Nodemailer
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
+// const transporter = nodemailer.createTransport({
+//   service: 'gmail',
+//   auth: {
+//     user: process.env.EMAIL_USER,
+//     pass: process.env.EMAIL_PASS,
+//   },
+// });
+
+
+// Set SendGrid API key
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
 // Generate 6-digit OTP
 const generateOtp = () => Math.floor(100000 + Math.random() * 900000).toString();
 
-// Send OTP
+// Send OTP route
 router.post('/send-otp', async (req, res) => {
   const { email } = req.body;
+
   if (!email || !/\S+@\S+\.\S+/.test(email)) {
     return res.status(400).json({ message: 'Invalid email' });
   }
 
   const otp = generateOtp();
-  const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+  const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 mins
 
   try {
-    // Delete existing OTPs for this email
+    // Delete any existing OTP for the email
     await pool.query('DELETE FROM otps WHERE email = ?', [email]);
 
-    // Store OTP
-    await pool.query('INSERT INTO otps (email, otp, expires_at) VALUES (?, ?, ?)', [
-      email,
-      otp,
-      expiresAt,
-    ]);
+    // Store the new OTP
+    await pool.query(
+      'INSERT INTO otps (email, otp, expires_at) VALUES (?, ?, ?)',
+      [email, otp, expiresAt]
+    );
 
-    // Send email
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
+    // Send the OTP email
+    const msg = {
       to: email,
-      subject: 'TaskApp OTP Verification',
-      text: `Your OTP for TaskApp registration is: ${otp}. It expires in 5 minutes.`,
+      from: process.env.FROM_EMAIL,
+      subject: 'Your TaskApp OTP Code',
+      text: `Your OTP for TaskApp is ${otp}. It expires in 5 minutes.`,
+      html: `<strong>Your OTP for TaskApp is ${otp}</strong><br/><p>It expires in 5 minutes.</p>`,
     };
 
-    await transporter.sendMail(mailOptions);
+    await sgMail.send(msg);
     console.log(`OTP sent to ${email}: ${otp}`);
     res.status(200).json({ message: 'OTP sent successfully' });
   } catch (error) {
-    console.error('Error sending OTP:', error);
+    console.error('Error sending OTP:', error.response?.body || error.message);
     res.status(500).json({ message: 'Failed to send OTP' });
   }
 });
+
+
+
+
+//working locally
+// const generateOtp = () => Math.floor(100000 + Math.random() * 900000).toString();
+
+// // Send OTP
+// router.post('/send-otp', async (req, res) => {
+//   const { email } = req.body;
+//   if (!email || !/\S+@\S+\.\S+/.test(email)) {
+//     return res.status(400).json({ message: 'Invalid email' });
+//   }
+
+//   const otp = generateOtp();
+//   const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+
+//   try {
+//     // Delete existing OTPs for this email
+//     await pool.query('DELETE FROM otps WHERE email = ?', [email]);
+
+//     // Store OTP
+//     await pool.query('INSERT INTO otps (email, otp, expires_at) VALUES (?, ?, ?)', [
+//       email,
+//       otp,
+//       expiresAt,
+//     ]);
+
+//     // Send email
+//     const mailOptions = {
+//       from: process.env.EMAIL_USER,
+//       to: email,
+//       subject: 'TaskApp OTP Verification',
+//       text: `Your OTP for TaskApp registration is: ${otp}. It expires in 5 minutes.`,
+//     };
+
+//     await transporter.sendMail(mailOptions);
+//     console.log(`OTP sent to ${email}: ${otp}`);
+//     res.status(200).json({ message: 'OTP sent successfully' });
+//   } catch (error) {
+//     console.error('Error sending OTP:', error);
+//     res.status(500).json({ message: 'Failed to send OTP' });
+//   }
+// });
 
 // Login
 router.post('/login', async (req, res) => {
