@@ -119,102 +119,104 @@ router.get('/users/all', authMiddleware, async (req, res) => {
 });
 
 // Get dashboard statistics
-// router.get('/dashboard', authMiddleware, async (req, res) => {
-//   try {
-//     const userName = req.user.username;
-//     // console.log(userId)
-//     const [[{ assignedToMe }]] = await pool.query(
-//       'SELECT COUNT(*) AS assignedToMe FROM tasks WHERE assigned_to = ?',
-//       [userName]
-//     );
-
-//     const [[{ assignedByMe }]] = await pool.query(
-//       'SELECT COUNT(*) AS assignedByMe FROM tasks WHERE created_by = ?',
-//       [userName]
-//     );
-
-//     const [[{ pending }]] = await pool.query(
-//       'SELECT COUNT(*) AS pending FROM tasks WHERE assigned_to = ? AND status = "Pending"',
-//       [userName]
-//     );
-
-//     const [[{ inProgress }]] = await pool.query(
-//       'SELECT COUNT(*) AS inProgress FROM tasks WHERE assigned_to = ? AND status = "In Progress"',
-//       [userName]
-//     );
-
-//     const [[{ completed }]] = await pool.query(
-//       'SELECT COUNT(*) AS completed FROM tasks WHERE assigned_to = ? AND status = "Completed"',
-//       [userName]
-//     );
-
-//     res.json({
-//       stats: { assignedToMe, assignedByMe, pending, inProgress, completed },
-//     });
-//   } catch (error) {
-//     console.error('Error fetching dashboard stats:', error);
-//     res.status(500).json({ message: 'Server error' });
-//   }
-// });
-
 router.get('/dashboard', authMiddleware, async (req, res) => {
   try {
     const userName = req.user.username;
-
-    // Subquery to get latest assigned_to from task_updates
-    const [assignedToMeRow] = await pool.query(`
-      SELECT COUNT(DISTINCT t.task_id) AS assignedToMe
-      FROM tasks t
-      LEFT JOIN (
-        SELECT tu.task_id, tu.assigned_to
-        FROM task_updates tu
-        JOIN (
-          SELECT task_id, MAX(updated_at) AS latest
-          FROM task_updates
-          WHERE assigned_to IS NOT NULL
-          GROUP BY task_id
-        ) latest_update ON tu.task_id = latest_update.task_id AND tu.updated_at = latest_update.latest
-      ) AS latest_assign ON t.task_id = latest_assign.task_id
-      WHERE COALESCE(latest_assign.assigned_to, t.assigned_to) = ?
-    `, [userName]);
+    // console.log(userId)
+    const [[{ assignedToMe }]] = await pool.query(
+      'SELECT COUNT(*) AS assignedToMe FROM tasks WHERE assigned_to = ?',
+      [userName]
+    );
 
     const [[{ assignedByMe }]] = await pool.query(
       'SELECT COUNT(*) AS assignedByMe FROM tasks WHERE created_by = ?',
       [userName]
     );
 
-    const [statusCounts] = await pool.query(`
-      SELECT 
-        SUM(CASE WHEN COALESCE(la.assigned_to, t.assigned_to) = ? AND t.status = 'Pending' THEN 1 ELSE 0 END) AS pending,
-        SUM(CASE WHEN COALESCE(la.assigned_to, t.assigned_to) = ? AND t.status = 'In Progress' THEN 1 ELSE 0 END) AS inProgress,
-        SUM(CASE WHEN COALESCE(la.assigned_to, t.assigned_to) = ? AND t.status = 'Completed' THEN 1 ELSE 0 END) AS completed
-      FROM tasks t
-      LEFT JOIN (
-        SELECT tu.task_id, tu.assigned_to
-        FROM task_updates tu
-        JOIN (
-          SELECT task_id, MAX(updated_at) AS latest
-          FROM task_updates
-          WHERE assigned_to IS NOT NULL
-          GROUP BY task_id
-        ) latest_update
-        ON tu.task_id = latest_update.task_id AND tu.updated_at = latest_update.latest
-      ) la ON t.task_id = la.task_id
-    `, [userName, userName, userName]);
+    const [[{ pending }]] = await pool.query(
+      'SELECT COUNT(*) AS pending FROM tasks WHERE assigned_to = ? AND status = "Pending"',
+      [userName]
+    );
+
+    const [[{ inProgress }]] = await pool.query(
+      'SELECT COUNT(*) AS inProgress FROM tasks WHERE assigned_to = ? AND status = "In Progress"',
+      [userName]
+    );
+
+    const [[{ completed }]] = await pool.query(
+      'SELECT COUNT(*) AS completed FROM tasks WHERE assigned_to = ? AND status = "Completed"',
+      [userName]
+    );
 
     res.json({
-      stats: {
-        assignedToMe: assignedToMeRow[0].assignedToMe,
-        assignedByMe,
-        ...statusCounts[0],
-      },
+      stats: { assignedToMe, assignedByMe, pending, inProgress, completed },
     });
-
   } catch (error) {
     console.error('Error fetching dashboard stats:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
+
+
+
+// router.get('/dashboard', authMiddleware, async (req, res) => {
+//   try {
+//     const userName = req.user.username;
+
+//     // Subquery to get latest assigned_to from task_updates
+//     const [assignedToMeRow] = await pool.query(`
+//       SELECT COUNT(DISTINCT t.task_id) AS assignedToMe
+//       FROM tasks t
+//       LEFT JOIN (
+//         SELECT tu.task_id, tu.assigned_to
+//         FROM task_updates tu
+//         JOIN (
+//           SELECT task_id, MAX(updated_at) AS latest
+//           FROM task_updates
+//           WHERE assigned_to IS NOT NULL
+//           GROUP BY task_id
+//         ) latest_update ON tu.task_id = latest_update.task_id AND tu.updated_at = latest_update.latest
+//       ) AS latest_assign ON t.task_id = latest_assign.task_id
+//       WHERE COALESCE(latest_assign.assigned_to, t.assigned_to) = ?
+//     `, [userName]);
+
+//     const [[{ assignedByMe }]] = await pool.query(
+//       'SELECT COUNT(*) AS assignedByMe FROM tasks WHERE created_by = ?',
+//       [userName]
+//     );
+
+//     const [statusCounts] = await pool.query(`
+//       SELECT 
+//         SUM(CASE WHEN COALESCE(la.assigned_to, t.assigned_to) = ? AND t.status = 'Pending' THEN 1 ELSE 0 END) AS pending,
+//         SUM(CASE WHEN COALESCE(la.assigned_to, t.assigned_to) = ? AND t.status = 'In Progress' THEN 1 ELSE 0 END) AS inProgress,
+//         SUM(CASE WHEN COALESCE(la.assigned_to, t.assigned_to) = ? AND t.status = 'Completed' THEN 1 ELSE 0 END) AS completed
+//       FROM tasks t
+//       LEFT JOIN (
+//         SELECT tu.task_id, tu.assigned_to
+//         FROM task_updates tu
+//         JOIN (
+//           SELECT task_id, MAX(updated_at) AS latest
+//           FROM task_updates
+//           WHERE assigned_to IS NOT NULL
+//           GROUP BY task_id
+//         ) latest_update
+//         ON tu.task_id = latest_update.task_id AND tu.updated_at = latest_update.latest
+//       ) la ON t.task_id = la.task_id
+//     `, [userName, userName, userName]);
+
+//     res.json({
+//       stats: {
+//         assignedToMe: assignedToMeRow[0].assignedToMe,
+//         assignedByMe,
+//         ...statusCounts[0],
+//       },
+//     });
+
+//   } catch (error) {
+//     console.error('Error fetching dashboard stats:', error);
+//     res.status(500).json({ message: 'Server error' });
+//   }
+// });
 
 
 
@@ -320,6 +322,7 @@ router.post('/create', authMiddleware, upload, async (req, res) => {
 });
 
 // Get tasks assigned to the logged-in user
+
 router.get('/assigned', authMiddleware, async (req, res) => {
   try {
     const username = req.user.username;
@@ -330,49 +333,7 @@ router.get('/assigned', authMiddleware, async (req, res) => {
     //   [username]
     // );
     const [rows] = await pool.query(
-      `SELECT t.*, 
-              COALESCE(tu.assigned_by, t.created_by) AS assigned_by,
-              COALESCE(tu.updated_at, t.created_at) AS last_updated_at
-        FROM tasks t
-        LEFT JOIN (
-            SELECT u1.task_id, u1.assigned_to, u1.assigned_by, u1.updated_at
-            FROM task_updates u1
-            JOIN (
-                SELECT task_id, MAX(updated_at) as max_time
-                FROM task_updates
-                WHERE assigned_to IS NOT NULL
-                GROUP BY task_id
-            ) u2 ON u1.task_id = u2.task_id AND u1.updated_at = u2.max_time
-        ) tu ON t.task_id = tu.task_id
-        WHERE COALESCE(tu.assigned_to, t.assigned_to) = ?`,
-      // `SELECT t.*, 
-      //     COALESCE(tu.updated_by, t.created_by) AS assigned_by,
-      //     COALESCE(tu.updated_at, t.created_at) AS last_updated_at
-      //     FROM tasks t
-      //     LEFT JOIN (
-      //         SELECT u1.task_id, u1.assigned_to, u1.updated_by, u1.updated_at
-      //         FROM task_updates u1
-      //         JOIN (
-      //             SELECT task_id, MAX(updated_at) as max_time
-      //             FROM task_updates
-      //             WHERE assigned_to IS NOT NULL
-      //             GROUP BY task_id
-      //         ) u2 ON u1.task_id = u2.task_id AND u1.updated_at = u2.max_time
-      //     ) tu ON t.task_id = tu.task_id
-      //     WHERE COALESCE(tu.assigned_to, t.assigned_to) = ?`,
-      //   `SELECT t.*
-      //  FROM tasks t
-      //  LEFT JOIN (
-      //      SELECT u1.task_id, u1.assigned_to
-      //      FROM task_updates u1
-      //      JOIN (
-      //          SELECT task_id, MAX(updated_at) as max_time
-      //          FROM task_updates
-      //          WHERE assigned_to IS NOT NULL
-      //          GROUP BY task_id
-      //      ) u2 ON u1.task_id = u2.task_id AND u1.updated_at = u2.max_time
-      //  ) tu ON t.task_id = tu.task_id
-      //  WHERE COALESCE(tu.assigned_to, t.assigned_to) = ?`,
+      `SELECT * from tasks where assigned_to = ?`,
       [username]
     );
 
@@ -383,6 +344,70 @@ router.get('/assigned', authMiddleware, async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
+
+// router.get('/assigned', authMiddleware, async (req, res) => {
+//   try {
+//     const username = req.user.username;
+//     console.log('Fetching tasks for user:', username);
+//     // const [rows] = await pool.query(
+//     //   `SELECT task_id, title, description, priority, status, due_date, created_by, audio_path, file_path, created_at
+//     //    FROM tasks WHERE assigned_to = ?`,
+//     //   [username]
+//     // );
+//     const [rows] = await pool.query(
+//       `SELECT t.*, 
+//               COALESCE(tu.assigned_by, t.created_by) AS assigned_by,
+//               COALESCE(tu.updated_at, t.created_at) AS last_updated_at
+//         FROM tasks t
+//         LEFT JOIN (
+//             SELECT u1.task_id, u1.assigned_to, u1.assigned_by, u1.updated_at
+//             FROM task_updates u1
+//             JOIN (
+//                 SELECT task_id, MAX(updated_at) as max_time
+//                 FROM task_updates
+//                 WHERE assigned_to IS NOT NULL
+//                 GROUP BY task_id
+//             ) u2 ON u1.task_id = u2.task_id AND u1.updated_at = u2.max_time
+//         ) tu ON t.task_id = tu.task_id
+//         WHERE COALESCE(tu.assigned_to, t.assigned_to) = ?`,
+//       // `SELECT t.*, 
+//       //     COALESCE(tu.updated_by, t.created_by) AS assigned_by,
+//       //     COALESCE(tu.updated_at, t.created_at) AS last_updated_at
+//       //     FROM tasks t
+//       //     LEFT JOIN (
+//       //         SELECT u1.task_id, u1.assigned_to, u1.updated_by, u1.updated_at
+//       //         FROM task_updates u1
+//       //         JOIN (
+//       //             SELECT task_id, MAX(updated_at) as max_time
+//       //             FROM task_updates
+//       //             WHERE assigned_to IS NOT NULL
+//       //             GROUP BY task_id
+//       //         ) u2 ON u1.task_id = u2.task_id AND u1.updated_at = u2.max_time
+//       //     ) tu ON t.task_id = tu.task_id
+//       //     WHERE COALESCE(tu.assigned_to, t.assigned_to) = ?`,
+//       //   `SELECT t.*
+//       //  FROM tasks t
+//       //  LEFT JOIN (
+//       //      SELECT u1.task_id, u1.assigned_to
+//       //      FROM task_updates u1
+//       //      JOIN (
+//       //          SELECT task_id, MAX(updated_at) as max_time
+//       //          FROM task_updates
+//       //          WHERE assigned_to IS NOT NULL
+//       //          GROUP BY task_id
+//       //      ) u2 ON u1.task_id = u2.task_id AND u1.updated_at = u2.max_time
+//       //  ) tu ON t.task_id = tu.task_id
+//       //  WHERE COALESCE(tu.assigned_to, t.assigned_to) = ?`,
+//       [username]
+//     );
+
+
+//     res.json(rows);
+//   } catch (error) {
+//     console.error('Error fetching assigned tasks:', error);
+//     res.status(500).json({ message: 'Server error' });
+//   }
+// });
 
 // Get tasks created by the logged-in user (i.e., assigned by them)
 router.get('/created-by-me', authMiddleware, async (req, res) => {
