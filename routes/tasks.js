@@ -293,13 +293,22 @@ router.post('/create', authMiddleware, upload, async (req, res) => {
     // ...after task insertion
     // await createNotification(assigned_to, `New task "${title}" has been assigned to you by ${created_by}`);
 
+    // await createNotification({
+    //   task_id: taskId,
+    //   sender: created_by,
+    //   receiver: assigned_to,
+    //   type: 'task_created',
+    //   // message: `New task "${title}" has been assigned to you by ${created_by}`
+    //   message: title
+    // });
+
     await createNotification({
       task_id: taskId,
       sender: created_by,
       receiver: assigned_to,
       type: 'task_created',
-      // message: `New task "${title}" has been assigned to you by ${created_by}`
-      message: title
+      message: title,      // Used by frontend to show task title
+      updates: null        // No update fields during creation
     });
 
 
@@ -589,12 +598,12 @@ router.put('/:taskId/update', authMiddleware, upload, async (req, res) => {
     if (audioPath) {
       fieldsToUpdate.push('audio_path = ?');
       updateValues.push(audioPath);
-      updatedFields.audio_path = audioPath;
+      updatedFields.audio_path = "Audio attached";
     }
     if (filePath) {
       fieldsToUpdate.push('file_path = ?');
       updateValues.push(filePath);
-      updatedFields.file_path = filePath;
+      updatedFields.file_path = "File attached";
     }
 
     if (fieldsToUpdate.length > 0) {
@@ -634,7 +643,7 @@ router.put('/:taskId/update', authMiddleware, upload, async (req, res) => {
       values
     );
 
-    // Notifications based on context
+    // Notification when assignee is chaned
     if (assigned_to && assigned_to !== task.assigned_to && assigned_to !== username) {
       await createNotification({
         task_id: taskId,
@@ -646,16 +655,31 @@ router.put('/:taskId/update', authMiddleware, upload, async (req, res) => {
       });
     }
 
-    if (task.created_by !== username) {
+    // Notification when updated by assignee to assigner
+    if (task.created_by !== username && task.assigned_to === username) {
       await createNotification({
         task_id: taskId,
         sender: username,
         receiver: task.created_by,
         type: 'task_updated',
-        message: title,
+        message: null, // frontend will handle formatting
         updates: updatedFields
       });
     }
+
+
+     // Notification when updated by assigneer to assignee
+    if (task.created_by === username) {
+      await createNotification({
+        task_id: taskId,
+        sender: username,
+        receiver: assigned_to,
+        type: 'task_updated_by_creator',
+        message: null, // frontend will handle formatting
+        updates: updatedFields
+      });
+    }
+
 
     res.json({ message: 'Task updated and changes notified' });
   } catch (err) {

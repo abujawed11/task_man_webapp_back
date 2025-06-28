@@ -6,7 +6,7 @@ const pool = require('../config/db'); // adjust this path if your db connection 
 // ✅ Get all unread notifications for the logged-in user
 // ✅ Get all notifications with task details
 
-//not working code now
+
 router.get('/', authMiddleware, async (req, res) => {
   const username = req.user.username;
 
@@ -19,6 +19,7 @@ router.get('/', authMiddleware, async (req, res) => {
          n.receiver,
          n.type,
          n.message,
+         n.updates,              -- ✅ make sure you're selecting this
          n.is_read,
          n.created_at,
          t.title AS task_title,
@@ -33,12 +34,56 @@ router.get('/', authMiddleware, async (req, res) => {
        ORDER BY n.created_at DESC`,
       [username]
     );
-    res.json(rows);
+
+    // Optional: Parse JSON safely in backend (recommended if you're not doing it in frontend)
+    const parsedRows = rows.map((row) => ({
+      ...row,
+      updates: row.updates ? JSON.parse(row.updates) : null
+    }));
+
+    res.json(parsedRows);
   } catch (error) {
     console.error('Error fetching notifications:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
+
+
+
+
+//not working code now
+// router.get('/', authMiddleware, async (req, res) => {
+//   const username = req.user.username;
+
+//   try {
+//     const [rows] = await pool.query(
+//       `SELECT 
+//          n.notification_id,
+//          n.task_id,
+//          n.sender,
+//          n.receiver,
+//          n.type,
+//          n.message,
+//          n.is_read,
+//          n.created_at,
+//          t.title AS task_title,
+//          t.priority,
+//          t.status,
+//          t.due_date,
+//          t.created_by AS task_creator
+//        FROM notifications n
+//        LEFT JOIN tasks t ON n.task_id = t.task_id
+//        WHERE n.receiver = ?
+//        AND n.is_read = 0
+//        ORDER BY n.created_at DESC`,
+//       [username]
+//     );
+//     res.json(rows);
+//   } catch (error) {
+//     console.error('Error fetching notifications:', error);
+//     res.status(500).json({ message: 'Server error' });
+//   }
+// });
 
 
 //working---------------------------------------
