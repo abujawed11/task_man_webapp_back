@@ -13,31 +13,32 @@ router.get('/', authMiddleware, async (req, res) => {
   try {
     const [rows] = await pool.query(
       `SELECT 
-         n.id AS notification_id,
-         n.message,
+         n.notification_id,
+         n.task_id,
+         n.sender,
          n.receiver,
-         n.created_at AS received_at,
+         n.type,
+         n.message,
          n.is_read,
-         t.title,
-         t.description,
+         n.created_at,
+         t.title AS task_title,
          t.priority,
          t.status,
          t.due_date,
-         t.created_by,
-         t.created_at AS task_created_at
+         t.created_by AS task_creator
        FROM notifications n
        LEFT JOIN tasks t ON n.task_id = t.task_id
        WHERE n.receiver = ?
+       AND n.is_read = 0
        ORDER BY n.created_at DESC`,
       [username]
     );
     res.json(rows);
   } catch (error) {
-    console.error('Error fetching notifications with task data:', error);
+    console.error('Error fetching notifications:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
-
 
 
 //working---------------------------------------
@@ -60,21 +61,51 @@ router.get('/', authMiddleware, async (req, res) => {
 
 
 // ✅ Mark all notifications as read
+// ✅ Mark a single notification as read
 router.post('/mark-read', authMiddleware, async (req, res) => {
   const username = req.user.username;
+  const { notificationId } = req.body;
+
+  if (!notificationId) {
+    return res.status(400).json({ message: 'Notification ID is required' });
+  }
 
   try {
-    await pool.query(
+    const [result] = await pool.query(
       `UPDATE notifications 
        SET is_read = 1 
-       WHERE receiver = ?`,
-      [username]
+       WHERE notification_id = ? AND receiver = ?`,
+      [notificationId, username]
     );
-    res.json({ message: 'Notifications marked as read' });
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: 'Notification not found or already read' });
+    }
+
+    res.json({ message: 'Notification marked as read' });
   } catch (error) {
-    console.error('Error marking notifications as read:', error);
+    console.error('Error marking notification as read:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
+
+
+
+// router.post('/mark-read', authMiddleware, async (req, res) => {
+//   const username = req.user.username;
+
+//   try {
+//     await pool.query(
+//       `UPDATE notifications 
+//        SET is_read = 1 
+//        WHERE receiver = ?`,
+//       [username]
+//     );
+//     res.json({ message: 'Notifications marked as read' });
+//   } catch (error) {
+//     console.error('Error marking notifications as read:', error);
+//     res.status(500).json({ message: 'Server error' });
+//   }
+// });
 
 module.exports = router;

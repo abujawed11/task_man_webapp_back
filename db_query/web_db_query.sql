@@ -32,7 +32,6 @@ CREATE TABLE tasks (
   FOREIGN KEY (created_by) REFERENCES users(username)
 );
 
-
 CREATE TABLE task_updates (
   id INT AUTO_INCREMENT PRIMARY KEY,
   task_id VARCHAR(10) NOT NULL,             -- references tasks.task_id
@@ -41,16 +40,20 @@ CREATE TABLE task_updates (
   title VARCHAR(255),
   description TEXT,
   assigned_to VARCHAR(50),
+  assigned_by VARCHAR(50),                  -- NEW: who assigned the task
   due_date DATE,
   priority VARCHAR(50),
   audio_path VARCHAR(255),
   file_path VARCHAR(255),
   comment TEXT,
+  is_system_generated BOOLEAN DEFAULT FALSE, -- NEW: for system-generated logs
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE,
   FOREIGN KEY (updated_by) REFERENCES users(username),
-  FOREIGN KEY (assigned_to) REFERENCES users(username)
+  FOREIGN KEY (assigned_to) REFERENCES users(username),
+  FOREIGN KEY (assigned_by) REFERENCES users(username)
 );
+
 
 
 CREATE TABLE otps (
@@ -81,31 +84,22 @@ CREATE TABLE notifications (
 );
 
 
-ALTER TABLE task_updates ADD COLUMN assigned_by VARCHAR(50) AFTER assigned_to;
-ALTER TABLE task_updates ADD FOREIGN KEY (assigned_by) REFERENCES users(username);
-ALTER TABLE task_updates ADD COLUMN is_system_generated BOOLEAN DEFAULT FALSE;
-
-INSERT INTO invite_codes (code) VALUES ('SUPERADMIN2026');
-
-
-CREATE TABLE task_updates (
+CREATE TABLE notifications (
   id INT AUTO_INCREMENT PRIMARY KEY,
-  task_id VARCHAR(10) NOT NULL,             -- references tasks.task_id
-  updated_by VARCHAR(50) NOT NULL,          -- references users.username
-  status VARCHAR(50),
-  title VARCHAR(255),
-  description TEXT,
-  assigned_to VARCHAR(50),
-  assigned_by VARCHAR(50),                  -- NEW: who assigned the task
-  due_date DATE,
-  priority VARCHAR(50),
-  audio_path VARCHAR(255),
-  file_path VARCHAR(255),
-  comment TEXT,
-  is_system_generated BOOLEAN DEFAULT FALSE, -- NEW: for system-generated logs
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE,
-  FOREIGN KEY (updated_by) REFERENCES users(username),
-  FOREIGN KEY (assigned_to) REFERENCES users(username),
-  FOREIGN KEY (assigned_by) REFERENCES users(username)
+  notification_id VARCHAR(10) UNIQUE,
+  task_id VARCHAR(10),
+  sender VARCHAR(50),
+  receiver VARCHAR(50) NOT NULL,
+  type ENUM('task_created', 'task_updated', 'task_commented', 'task_reassigned') NOT NULL,
+  message TEXT NULL,           -- Now optional
+  updates TEXT,                -- New: JSON string of updated fields
+  is_read BOOLEAN DEFAULT FALSE,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE SET NULL,
+  FOREIGN KEY (receiver) REFERENCES users(username),
+  FOREIGN KEY (sender) REFERENCES users(username)
 );
+
+
+
+
