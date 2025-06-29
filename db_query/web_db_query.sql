@@ -90,7 +90,7 @@ CREATE TABLE notifications (
   task_id VARCHAR(10),
   sender VARCHAR(50),
   receiver VARCHAR(50) NOT NULL,
-  type ENUM('task_created', 'task_updated', 'task_commented', 'task_reassigned') NOT NULL,
+  type VARCHAR(50) NOT NULL,
   message TEXT NULL,           -- Now optional
   updates TEXT,                -- New: JSON string of updated fields
   is_read BOOLEAN DEFAULT FALSE,

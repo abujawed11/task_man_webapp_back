@@ -619,126 +619,132 @@ router.put('/:taskId/update', authMiddleware, upload, async (req, res) => {
         );
       }
     }
-    // else {
-    // if (status && status !== task.status) {
+    else
+      if (status && status !== task.status) {
+        await pool.query(
+          `UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?`,
+          [status, taskId]
+        );
+      }
+  
     await pool.query(
-      `UPDATE tasks SET updated_at = CURRENT_TIMESTAMP WHERE task_id = ?`,
-      [taskId]
-    );
-    // }
-    // }
+    `UPDATE tasks SET updated_at = CURRENT_TIMESTAMP WHERE task_id = ?`,
+    [taskId]
+  );
+  // }
+  // }
 
-    // 3. Insert into task_updates table only changed fields
-    const columns = ['task_id', 'updated_by'];
-    const placeholders = ['?', '?'];
-    const values = [taskId, username];
+  // 3. Insert into task_updates table only changed fields
+  const columns = ['task_id', 'updated_by'];
+  const placeholders = ['?', '?'];
+  const values = [taskId, username];
 
-    if (status && status !== task.status) {
-      columns.push('status');
-      placeholders.push('?');
-      values.push(status);
-      updatedFields.status = status;
-    }
-    if (title && title !== task.title) {
-      columns.push('title');
-      placeholders.push('?');
-      values.push(title);
-      updatedFields.title = title;
-    }
-    if (description && description !== task.description) {
-      columns.push('description');
-      placeholders.push('?');
-      values.push(description);
-      updatedFields.description = description;
-    }
-    if (priority && priority !== task.priority) {
-      columns.push('priority');
-      placeholders.push('?');
-      values.push(priority);
-      updatedFields.priority = priority;
-    }
-    if (due_date && due_date !== task.due_date?.toISOString().split('T')[0]) {
-      columns.push('due_date');
-      placeholders.push('?');
-      values.push(due_date);
-      updatedFields.due_date = due_date;
-    }
-    if (assigned_to && assigned_to !== task.assigned_to) {
-      columns.push('assigned_to');
-      placeholders.push('?');
-      values.push(assigned_to);
-      columns.push('assigned_by');
-      placeholders.push('?');
-      values.push(username);
-      updatedFields.assigned_to = assigned_to;
-    }
-    if (comment) {
-      columns.push('comment');
-      placeholders.push('?');
-      values.push(comment);
-      updatedFields.comment = comment;
-    }
-    if (audioPath) {
-      columns.push('audio_path');
-      placeholders.push('?');
-      values.push(audioPath);
-      updatedFields.audio_path = "Audio attached";
-    }
-    if (filePath) {
-      columns.push('file_path');
-      placeholders.push('?');
-      values.push(filePath);
-      updatedFields.file_path = "File attached";
-    }
-
-    await pool.query(
-      `INSERT INTO task_updates (${columns.join(', ')}) VALUES (${placeholders.join(', ')})`,
-      values
-    );
-
-    // Notification when assignee is chaned
-    if (assigned_to && assigned_to !== task.assigned_to && assigned_to !== username) {
-      await createNotification({
-        task_id: taskId,
-        sender: username,
-        receiver: assigned_to,
-        type: 'task_reassigned',
-        message: title,
-        updates: updatedFields
-      });
-    }
-
-    // Notification when updated by assignee to assigner
-    if (task.created_by !== username && task.assigned_to === username) {
-      await createNotification({
-        task_id: taskId,
-        sender: username,
-        receiver: task.created_by,
-        type: 'task_updated',
-        message: null, // frontend will handle formatting
-        updates: updatedFields
-      });
-    }
-
-
-    // Notification when updated by assigneer to assignee
-    if (task.created_by === username) {
-      await createNotification({
-        task_id: taskId,
-        sender: username,
-        receiver: assigned_to,
-        type: 'task_updated_by_creator',
-        message: null, // frontend will handle formatting
-        updates: updatedFields
-      });
-    }
-
-    res.json({ message: 'Task updated and logged successfully' });
-
-  } catch (err) {
-    console.error('Update failed:', err);
-    res.status(500).json({ message: 'Server error' });
+  if (status && status !== task.status) {
+    columns.push('status');
+    placeholders.push('?');
+    values.push(status);
+    updatedFields.status = status;
   }
+  if (title && title !== task.title) {
+    columns.push('title');
+    placeholders.push('?');
+    values.push(title);
+    updatedFields.title = title;
+  }
+  if (description && description !== task.description) {
+    columns.push('description');
+    placeholders.push('?');
+    values.push(description);
+    updatedFields.description = description;
+  }
+  if (priority && priority !== task.priority) {
+    columns.push('priority');
+    placeholders.push('?');
+    values.push(priority);
+    updatedFields.priority = priority;
+  }
+  if (due_date && due_date !== task.due_date?.toISOString().split('T')[0]) {
+    columns.push('due_date');
+    placeholders.push('?');
+    values.push(due_date);
+    updatedFields.due_date = due_date;
+  }
+  if (assigned_to && assigned_to !== task.assigned_to) {
+    columns.push('assigned_to');
+    placeholders.push('?');
+    values.push(assigned_to);
+    columns.push('assigned_by');
+    placeholders.push('?');
+    values.push(username);
+    updatedFields.assigned_to = assigned_to;
+  }
+  if (comment) {
+    columns.push('comment');
+    placeholders.push('?');
+    values.push(comment);
+    updatedFields.comment = comment;
+  }
+  if (audioPath) {
+    columns.push('audio_path');
+    placeholders.push('?');
+    values.push(audioPath);
+    updatedFields.audio_path = "Audio attached";
+  }
+  if (filePath) {
+    columns.push('file_path');
+    placeholders.push('?');
+    values.push(filePath);
+    updatedFields.file_path = "File attached";
+  }
+
+  await pool.query(
+    `INSERT INTO task_updates (${columns.join(', ')}) VALUES (${placeholders.join(', ')})`,
+    values
+  );
+
+  // Notification when assignee is chaned
+  if (assigned_to && assigned_to !== task.assigned_to && assigned_to !== username) {
+    await createNotification({
+      task_id: taskId,
+      sender: username,
+      receiver: assigned_to,
+      type: 'task_reassigned',
+      message: title,
+      updates: updatedFields
+    });
+  }
+
+  // Notification when updated by assignee to assigner
+  if (task.created_by !== username && task.assigned_to === username) {
+    await createNotification({
+      task_id: taskId,
+      sender: username,
+      receiver: task.created_by,
+      type: 'task_updated',
+      message: null, // frontend will handle formatting
+      updates: updatedFields
+    });
+  }
+
+
+  // Notification when updated by assigneer to assignee
+  if (task.created_by === username) {
+    await createNotification({
+      task_id: taskId,
+      sender: username,
+      receiver: assigned_to,
+      type: 'task_updated_by_creator',
+      message: null, // frontend will handle formatting
+      updates: updatedFields
+    });
+  }
+
+  res.json({ message: 'Task updated and logged successfully' });
+
+} catch (err) {
+  console.error('Update failed:', err);
+  res.status(500).json({ message: 'Server error' });
+}
 });
 
 
