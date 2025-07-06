@@ -153,4 +153,36 @@ router.post('/mark-read', authMiddleware, async (req, res) => {
 //   }
 // });
 
+
+router.post("/register-token", authMiddleware, async (req, res) => {
+  const { expo_push_token } = req.body;
+  const user_id = req.user.id; // ✅ From JWT, secure
+  
+  console.log("📨 Received token registration request");
+
+  if (!expo_push_token) {
+    return res.status(400).json({ message: "Missing push token" });
+  }
+
+  try {
+    const [result] = await pool.query(
+    `INSERT INTO user_push_tokens (user_id, expo_push_token)
+	VALUES (?, ?)
+	ON DUPLICATE KEY UPDATE
+	expo_push_token = VALUES(expo_push_token),
+	updated_at = CURRENT_TIMESTAMP`,
+      [user_id, expo_push_token]
+    );
+	console.log("✅ Push token saved/updated successfully");
+	
+    res.status(200).json({ message: "Token saved" });
+  } catch (err) {
+    console.error("❌ Error:", err);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+});
+
+
+
+
 module.exports = router;

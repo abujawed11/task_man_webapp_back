@@ -101,5 +101,15 @@ CREATE TABLE notifications (
 );
 
 
+CREATE TABLE user_push_tokens (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id VARCHAR(10) NOT NULL UNIQUE,  -- ✅ enforce 1 row per user
+  expo_push_token VARCHAR(255) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+);
+
+
 
 
